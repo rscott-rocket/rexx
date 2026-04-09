@@ -233,7 +233,6 @@ WA@SUBPOOL          EQU   51
          IHAASSB
          IHAASVT
          IHASAVER
-         IAZJSAB   LIST=YES
          YREGS
 *--------+---------+---------+---------+---------+---------+---------+-
 * REXX control blocks
