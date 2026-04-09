@@ -2,12 +2,12 @@ A very small repo of REXX external functions that can add to the IBM-supplied fu
 
 These programs typically run unauthorized, problem state and in the key of the caller.
 
-Sample JCL to assemble and link can be found in the asmlink.txt file 
+Sample JCL to assemble and link can be found in the asmlink.txt file. 
 
 List of functions :
 
-JOBVAR    
-Provide current job related values in a similar fashion to IBM MVSVAR and SYSVAR
+JOBVAR  
+Provide current job related values in a similar fashion to IBM MVSVAR and SYSVAR.
 
-PATTERN
-Provide pattern match functions using ISPF-like wildcard characters
+PATTERN  
+Provide pattern match functions using ISPF-like wildcard characters.
