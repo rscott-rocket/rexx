@@ -1,0 +1,245 @@
+PATTERN  TITLE 'REXX EXTERNAL FUNCTION TO PATTERN MATCH DATA'
+*--------+---------+---------+---------+---------+---------+---------+-
+* This program provides a REXX external function to pattern match data
+* given a character string and an ISPF-like pattern.
+*
+* This function calls the IBM supplied ASAXWC service to perform the
+* pattern match logic.
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+* Syntax
+*
+*   result = PATTERN(string,mask)
+*
+*   Where :
+*     result   = Result field (0 = No match, 1 = Match)
+*     string   = The data string to be compared.
+*     mask     = The pattern mask data.
+*                  % = one character
+*                  * = zero or more characters
+*
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+* Example
+*
+*   /* REXX                           */
+*   result = PATTERN('SYS1.LINKLIB','%YS1.*')
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+*
+* Input
+*
+* R1  - Parameters passed to program : EFPL (from REXX)
+*
+* Output
+*
+* R15 - Return code value (always zero)
+*
+*
+* Regs used
+*
+* R2  -
+* R3  -
+* R4  - ARGTABLE_ENTRY
+* R5  -
+* R6  -
+* R7  -
+* R8  - ASCB
+* R9  -
+* R10 - EVALBLOCK
+* R11 - EFPL
+* R12 - Literal pool and constants
+* R13 - Working storage (WA)
+*
+*
+* Notes
+*
+* (o) Code requires the IBM Structured Programming Macros which
+*     are found in the SASMMAC2 dataset and should be added to
+*     the ASMA90 SYSLIB concatenation along with MACLIB and MODGEN.
+*
+* (o) EFPL passed to program (as we are a REXX external function)
+*
+* (o) When an invalid parameter is passed to the function, we return
+*     a value of "-1" (character)
+*
+* (o) BAKR/PR used for subroutine state save and restore - replace
+*     with in-house macro if needed
+*
+* (o) This program needs to be linked into a load library that is
+*     available for normal LINK/LOAD operations for the current ASID.
+*     Typically this would be STEPLIB or the system link list
+*
+* (o) This program runs in caller key and AC(0) and should be linked
+*     with the RENT parameter
+*--------+---------+---------+---------+---------+---------+---------+-
+* Changes
+* 2026/04/09  RDS  Original version
+*--------+---------+---------+---------+---------+---------+---------+-
+PATTERN  CSECT
+PATTERN  AMODE 31
+PATTERN  RMODE ANY
+*--------+---------+---------+---------+---------+---------+---------+-
+* Copy in the IBM SPMs - code will not assemble without them
+* Declare that we can use related addressing and also copy in a really
+* good macro that converts "branch" instructions to "jump"
+*--------+---------+---------+---------+---------+---------+---------+-
+         SYSSTATE ARCHLVL=2
+         PRINT OFF
+         COPY  ASMMSP
+         COPY  IEABRC
+         PRINT ON
+         BAKR  R14,R0
+         LARL  R12,PATTERN_DATA
+         USING (PATTERN_DATA,PATTERN_DATA_END),R12
+         MODID ,
+*--------+---------+---------+---------+---------+---------+---------+-
+* Process the passed parms and grab our ASCB for later use
+*--------+---------+---------+---------+---------+---------+---------+-
+         LR    R11,R1
+         USING EFPL,R11
+         LLGT  R10,EFPLEVAL           addr of pointer to eval block
+         L     R10,0(,R10)            REXX eval block addr
+         USING EVALBLOCK,R10          address it
+         LLGT  R4,EFPLARG             REXX arg list
+         USING ARGTABLE_ENTRY,R4      address arg table
+*--------+---------+---------+---------+---------+---------+---------+-
+* Grab some working storage - as we use 8K, there is no need to
+* clear the memory as z/OS will do it for us.
+*
+* We use a non-zero subpool number to make our storage easier to
+* find (and track) in IPCS and other tools
+*--------+---------+---------+---------+---------+---------+---------+-
+         STORAGE OBTAIN,                                               +
+               LENGTH=WA@LEN,                                          +
+               ADDR=(R13),                                             +
+               SP=WA@SUBPOOL,                                          +
+               LOC=ANY,                                                +
+               COND=NO
+         USING WA,R13
+         USING SAVER,WA_F1SA
+         MVC   SAVPREV,=C'F1SA'        Indicate using linkage stack
+         MVC   WA_CSECT,=CL8'PATTERN'  Owner of WA for debug
+*--------+---------+---------+---------+---------+---------+---------+-
+* Prime data to return in case of error
+*--------+---------+---------+---------+---------+---------+---------+-
+         MVC   EVALBLOCK_EVLEN,=AL4(L'LC_ERROR_DATA)
+         MVC   EVALBLOCK_EVDATA(L'LC_ERROR_DATA),LC_ERROR_DATA
+*--------+---------+---------+---------+---------+---------+---------+-
+* Process the passed parameters and return back the data required
+*--------+---------+---------+---------+---------+---------+---------+-
+         DO    ,
+           DOEXIT (CLC,LC_ARGTABLE_END,EQ,ARGTABLE_ENTRY)  End args?
+*--------+---------+---------+---------+---------+---------+---------+-
+* Process the string data and store its address in R5
+*--------+---------+---------+---------+---------+---------+---------+-
+           XGR   R5,R5                 Clear reg for argument
+           XGR   R14,R14               Clear reg for length
+           DOEXIT (LT,R5,ARGTABLE_ARGSTRING_PTR,Z)
+           DOEXIT (LT,R14,ARGTABLE_ARGSTRING_LENGTH,Z)
+           ST    R14,WA_STRING_LEN
+*--------+---------+---------+---------+---------+---------+---------+-
+* Process the pattern data and store its address in R6
+*--------+---------+---------+---------+---------+---------+---------+-
+           AGHI  R4,LC@ARGTABLE_LEN    Next argtable entry
+           DOEXIT (CLC,LC_ARGTABLE_END,EQ,ARGTABLE_ENTRY)  End args?
+           XGR   R6,R6                 Clear reg for argument
+           XGR   R14,R14               Clear reg for length
+           DOEXIT (LT,R6,ARGTABLE_ARGSTRING_PTR,Z)
+           DOEXIT (LT,R14,ARGTABLE_ARGSTRING_LENGTH,Z)
+           ST    R14,WA_PATTERN_LEN
+*--------+---------+---------+---------+---------+---------+---------+-
+* Call the IBM supplied ASAXWC service to match data
+*--------+---------+---------+---------+---------+---------+---------+-
+           ASAXWC STRING=(R5),                                         +
+               STRINGLEN=WA_STRING_LEN,                                +
+               PATTERNSTR=(R6),                                        +
+               PATTERNSTRLEN=WA_PATTERN_LEN,                           +
+               ZEROORMORE=LC_ZERO_OR_MORE,                             +
+               ONECHAR=LC_ONE_CHAR,                                    +
+               MF=(E,WA_ASAXWC_PLIST)
+           IF (LTR,R15,R15,Z)
+             MVC   EVALBLOCK_EVLEN,=AL4(L'LC_MATCH)
+             MVC   EVALBLOCK_EVDATA(L'LC_MATCH),LC_MATCH
+           ELSE
+             MVC   EVALBLOCK_EVLEN,=AL4(L'LC_NO_MATCH)
+             MVC   EVALBLOCK_EVDATA(L'LC_NO_MATCH),LC_NO_MATCH
+           ENDIF
+         ENDDO
+*--------+---------+---------+---------+---------+---------+---------+-
+* Cleanup and return
+* Because we are using linkage stack is it really easy to just
+* release the storage, set the RC and issue "PR"
+*--------+---------+---------+---------+---------+---------+---------+-
+         STORAGE RELEASE,                                              +
+               LENGTH=WA@LEN,                                          +
+               ADDR=(R13),                                             +
+               SP=WA@SUBPOOL,                                          +
+               COND=NO
+         LHI   R15,LC@RC_ZERO
+         PR
+*--------+---------+---------+---------+---------+---------+---------+-
+* Local variables (addressed by R12)
+*--------+---------+---------+---------+---------+---------+---------+-
+PATTERN_DATA       DS    0D
+                   DC    A(PATTERN)    Mainline start (debug)
+                   DS    0D
+                   LTORG ,
+LC@RC_ZERO         EQU   0
+LC@ARGTABLE_LEN    EQU   ARGTABLE_NEXT-ARGTABLE_ENTRY
+LC_ARGTABLE_END    DC    XL8'FFFFFFFFFFFFFFFF'
+LC_ONE_CHAR        DC    C'%'
+LC_ZERO_OR_MORE    DC    C'*'
+LC_MATCH           DC    C'1'
+LC_NO_MATCH        DC    C'0'
+LC_ERROR_DATA      DC    C'-1'
+*--------+---------+---------+---------+---------+---------+---------+-
+* End of local variables
+*--------+---------+---------+---------+---------+---------+---------+-
+PATTERN_DATA_END   DS    0D
+*
+*
+         DROP  ,
+*
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+* DSECTs
+*--------+---------+---------+---------+---------+---------+---------+-
+*
+*
+WA                  DSECT
+*--------+---------+---------+---------+---------+---------+---------+-
+* Working storage
+*--------+---------+---------+---------+---------+---------+---------+-
+WA_F1SA             DS    XL(SAVER_LEN) Savearea
+WA_CSECT            DS    CL8           Eye-catcher for dump
+WA_STRING_LEN       DS    F             String length
+WA_PATTERN_LEN      DS    F             Pattern length
+                    DS    0D
+                    ASAXWC MF=(L,WA_ASAXWC_PLIST)
+                    DS    0D
+WA@USED_LEN         EQU   *-WA          Used length
+WA@LEN              EQU   8192
+WA@SUBPOOL          EQU   51
+*
+*
+*
+*--------+---------+---------+---------+---------+-- ------+---------+-
+* Basic MVS control blocks and equates
+*--------+---------+---------+---------+---------+---------+---------+-
+         IHAPSA
+         CVT       DSECT=YES,LIST=YES
+         IHAASCB
+         IHAASSB
+         IHAASVT
+         IHASAVER
+         IAZJSAB   LIST=YES
+         YREGS
+*--------+---------+---------+---------+---------+---------+---------+-
+* REXX control blocks
+*--------+---------+---------+---------+---------+---------+---------+-
+         IRXEFPL
+         IRXEVALB
+         IRXARGTB  DECLARE=YES
+*
+         END
