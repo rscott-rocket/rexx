@@ -8,3 +8,6 @@ List of functions :
 
 JOBVAR    
 Provide current job related values in a similar fashion to IBM MVSVAR and SYSVAR
+
+PATTERN
+Provide pattern match functions using ISPF-like wildcard characters
