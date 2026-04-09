@@ -18,7 +18,7 @@ Note that the names or SASMMAC2, MACLIB and MODGEN might be different at your si
 //SYSADATA DD  DUMMY                                               
 //SYSLIN   DD  DISP=SHR,DSN=userid.OBJ(program)                     
 //*                                                                
-//LINK EXEC PGM=IEWL,PARM='MAP,LET,LIST,XCAL,RENT',COND=(8,LT,ASM) 
+//LINK EXEC PGM=IEWL,PARM='MAP,LET,LIST,XCAL,RENT'
 //SYSLMOD  DD  DISP=SHR,DSN=userid.LINKLIB                         
 //SYSPRINT DD  SYSOUT=*                                            
 //SYSUT1   DD  UNIT=SYSDA,SPACE=(CYL,(2,1))                        
