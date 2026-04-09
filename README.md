@@ -26,4 +26,4 @@ Note that the names or SASMMAC2, MACLIB and MODGEN might be different at your si
 //SYSLIN   DD  *                                                   
   INCLUDE SYSOBJ(program)                                           
   ENTRY program                                                     
-  NAME program(R)                                                   
+  NAME program(R)  
