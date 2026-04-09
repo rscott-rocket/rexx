@@ -6,4 +6,5 @@ Sample JCL to assemble and link can be found in the asmlink.txt file
 
 List of functions :
 
-JOBVAR    Provide current job related values in a similar fashion to IBM MVSVAR and SYSVAR
+JOBVAR    
+Provide current job related values in a similar fashion to IBM MVSVAR and SYSVAR
