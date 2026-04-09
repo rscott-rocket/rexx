@@ -1,0 +1,377 @@
+JOBVAR   TITLE 'REXX EXTERNAL FUNCTION TO RETURN JOB VARIABLES'
+*--------+---------+---------+---------+---------+---------+---------+-
+* This program provides a REXX external function to return information
+* about the current address space that is not provided as part of the
+* standard REXX functions.
+*
+* This is an extremly simplistic program whose intention is to
+* provide a starting point for anyone wanting to write REXX external
+* functions.
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+* Syntax
+*
+*   field = JOBVAR(name)
+*
+*   Where :
+*     field    = Rexx variable name to hold the result of the call
+*     name     = The requested variable name requested, which is one
+*                of the following values :
+*
+*                  JOBNAME : Jobname
+*                  JOBID   : JES Jobid
+*                  JOBCORR : JES Job correlator value (if any)
+*                  SSNAME  : Subsystem name
+*                  USERID  : Userid (owner) associated with the ASID
+*                  XCFGPNM : JES XCF group name (MAS name)
+*
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+* Example
+*
+*   /* REXX                           */
+*   jobid = JOBVAR('JOBID')
+*   say "My JES Jobid is "jobid
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+*
+* Input
+*
+* R1  - Parameters passed to program : EFPL (from REXX)
+*
+* Output
+*
+* R15 - Return code value (always zero)
+*
+*
+* Regs used
+*
+* R2  -
+* R3  -
+* R4  - ARGTABLE_ENTRY
+* R5  -
+* R6  -
+* R7  -
+* R8  - ASCB
+* R9  -
+* R10 - EVALBLOCK
+* R11 - EFPL
+* R12 - Literal pool and constants
+* R13 - Working storage (WA)
+*
+*
+* Notes
+*
+* (o) Code requires the IBM Structured Programming Macros which
+*     are found in the SASMMAC2 dataset and should be added to
+*     the ASMA90 SYSLIB concatenation along with MACLIB and MODGEN.
+*
+* (o) EFPL passed to program (as we are a REXX external function)
+*
+* (o) When an invalid parameter is passed to the function, we return
+*     a value of "-1" (character)
+*
+* (o) BAKR/PR used for subroutine state save and restore - replace
+*     with in-house macro if needed
+*
+* (o) This program needs to be linked into a load library that is
+*     available for normal LINK/LOAD operations for the current ASID.
+*     Typically this would be STEPLIB or the system link list
+*
+* (o) This program runs in caller key and AC(0) and should be linked
+*     with the RENT parameter
+*--------+---------+---------+---------+---------+---------+---------+-
+* Changes
+* 2026/04/09  RDS  Original version
+*--------+---------+---------+---------+---------+---------+---------+-
+JOBVAR   CSECT
+JOBVAR   AMODE 31
+JOBVAR   RMODE ANY
+*--------+---------+---------+---------+---------+---------+---------+-
+* Copy in the IBM SPMs - code will not assemble without them
+* Declare that we can use related addressing and also copy in a really
+* good macro that converts "branch" instructions to "jump"
+*--------+---------+---------+---------+---------+---------+---------+-
+         SYSSTATE ARCHLVL=2
+         PRINT OFF
+         COPY  ASMMSP
+         COPY  IEABRC
+         PRINT ON
+         BAKR  R14,R0
+         LARL  R12,JOBVAR_DATA
+         USING (JOBVAR_DATA,JOBVAR_DATA_END),R12
+         MODID ,
+*--------+---------+---------+---------+---------+---------+---------+-
+* Process the passed parms and grab our ASCB for later use
+*--------+---------+---------+---------+---------+---------+---------+-
+         LR    R11,R1
+         USING EFPL,R11
+         LLGT  R10,EFPLEVAL           addr of pointer to eval block
+         L     R10,0(,R10)            REXX eval block addr
+         USING EVALBLOCK,R10          address it
+         LLGT  R4,EFPLARG             REXX arg list
+         USING ARGTABLE_ENTRY,R4      address arg table
+         LLGT  R8,PSAAOLD-PSA(,R0)    Get ASCB address
+         USING ASCB,R8
+*--------+---------+---------+---------+---------+---------+---------+-
+* Grab some working storage - as we use 8K, there is no need to
+* clear the memory as z/OS will do it for us.
+*
+* We use a non-zero subpool number to make our storage easier to
+* find (and track) in IPCS and other tools
+*--------+---------+---------+---------+---------+---------+---------+-
+         STORAGE OBTAIN,                                               +
+               LENGTH=WA@LEN,                                          +
+               ADDR=(R13),                                             +
+               SP=WA@SUBPOOL,                                          +
+               LOC=ANY,                                                +
+               COND=NO
+         USING WA,R13
+         USING SAVER,WA_F1SA
+         MVC   SAVPREV,=C'F1SA'        Indicate using linkage stack
+         MVC   WA_CSECT,=CL8'JOBVAR'   Owner of WA for debug
+*--------+---------+---------+---------+---------+---------+---------+-
+* Prime data to return in case of error
+*--------+---------+---------+---------+---------+---------+---------+-
+         MVC   EVALBLOCK_EVLEN,=AL4(L'LC_ERROR_DATA)
+         LLGT  R14,EVALBLOCK_EVLEN
+         AGHI  R14,-1
+         LAY   R1,LC_ERROR_DATA
+         EX    R14,LC_COPY_RESULT
+*--------+---------+---------+---------+---------+---------+---------+-
+* Process the passed parameters and return back the data required
+*--------+---------+---------+---------+---------+---------+---------+-
+         DO    ,
+           MVC   WA_FUNCTION,LC_BLANKS Clear function name
+           XGR   R5,R5                 Clear reg for argument
+           XGR   R14,R14               Clear reg for length
+           DOEXIT (LT,R5,ARGTABLE_ARGSTRING_PTR,Z)
+           DOEXIT (LT,R14,ARGTABLE_ARGSTRING_LENGTH,Z)
+           DOEXIT (CHI,R14,GT,L'WA_FUNCTION)
+           AGHI  R14,-1
+           EX    R14,LC_COPY_FUNCTION
+*--------+---------+---------+---------+---------+---------+---------+-
+* Handle the processing for the specified function if it exists in
+* the function table
+*
+* It would be easy to expand this to other types of data beyond that
+* returned by IAZXJSAB
+*--------+---------+---------+---------+---------+---------+---------+-
+           LAY   R6,LC_FUNCTAB         Point to function table
+           USING FUNCTAB,R6
+*--------+---------+---------+---------+---------+---------+---------+-
+* Loop until we have a match and invoke its data gathering routine
+* We then copy the result date (from WA) into the REXX evaluation
+* block.
+*--------+---------+---------+---------+---------+---------+---------+-
+           DO FROM=((R3),=AL4(LC@FUNCTAB_NUM))
+             IF (CLC,WA_FUNCTION,EQ,FUNCTAB_NAME)
+               LLGT  R15,FUNCTAB_ROUTINE
+               BASR  R14,R15
+               MVC   EVALBLOCK_EVLEN,FUNCTAB_DATA_LEN
+               LLGT  R14,EVALBLOCK_EVLEN
+               AGHI  R14,-1
+               LAY   R1,WA
+               AL    R1,FUNCTAB_DATA_OFFSET
+               EX    R14,LC_COPY_RESULT
+               DOEXIT ,
+             ENDIF
+             AGHI  R6,FUNCTAB@LEN
+           ENDDO
+         ENDDO
+*--------+---------+---------+---------+---------+---------+---------+-
+* Cleanup and return
+* Because we are using linkage stack is it really easy to just
+* release the storage, set the RC and issue "PR"
+*--------+---------+---------+---------+---------+---------+---------+-
+         STORAGE RELEASE,                                              +
+               LENGTH=WA@LEN,                                          +
+               ADDR=(R13),                                             +
+               SP=WA@SUBPOOL,                                          +
+               COND=NO
+         LHI   R15,LC@RC_ZERO
+         PR
+*--------+---------+---------+---------+---------+---------+---------+-
+* Local variables (addressed by R12)
+*--------+---------+---------+---------+---------+---------+---------+-
+JOBVAR_DATA        DS    0D
+                   DC    A(JOBVAR)     Mainline start (debug)
+LC_COPY_FUNCTION   MVC   WA_FUNCTION(0),0(R5)
+LC_COPY_RESULT     MVC   EVALBLOCK_EVDATA(0),0(R1)
+                   DS    0D
+LC_ERROR_DATA      DC    C'-1'
+                   DS    0D
+LC_BLANKS          DC    CL8' '
+*
+LC_FUNCTAB         DS    0D
+*--------+---------+---------+---------+---------+---------+---------+-
+* Function table entries
+* (1) Function name
+* (2) Address of data gathering subroutine
+* (3) Offset of value in working storage
+* (4) length of result
+*
+* Mapped by the FUNCTAB DSECT
+*--------+---------+---------+---------+---------+---------+---------+-
+                   DC    CL8'JOBID'
+                   DC    A(ISSUE_IAZXJSAB)
+                   DC    AL4(WA_IAZXJSAB_JOBID-WA)
+                   DC    AL4(L'WA_IAZXJSAB_JOBID)
+*
+                   DC    CL8'USERID'
+                   DC    A(ISSUE_IAZXJSAB)
+                   DC    AL4(WA_IAZXJSAB_USERID-WA)
+                   DC    AL4(L'WA_IAZXJSAB_USERID)
+*
+                   DC    CL8'SSNAME'
+                   DC    A(ISSUE_IAZXJSAB)
+                   DC    AL4(WA_IAZXJSAB_SSNAME-WA)
+                   DC    AL4(L'WA_IAZXJSAB_SSNAME)
+*
+                   DC    CL8'JOBCORR'
+                   DC    A(ISSUE_IAZXJSAB)
+                   DC    AL4(WA_IAZXJSAB_JOBCORR-WA)
+                   DC    AL4(L'WA_IAZXJSAB_JOBCORR)
+*
+                   DC    CL8'XCFGPNM'
+                   DC    A(ISSUE_IAZXJSAB)
+                   DC    AL4(WA_IAZXJSAB_XCFGPNM-WA)
+                   DC    AL4(L'WA_IAZXJSAB_XCFGPNM)
+*
+LC@FUNCTAB_SIZE    EQU   *-LC_FUNCTAB
+LC@FUNCTAB_NUM     EQU   LC@FUNCTAB_SIZE/FUNCTAB@LEN
+*
+                   DS    0D
+                   LTORG ,
+LC@RC_ZERO         EQU   0
+*--------+---------+---------+---------+---------+---------+---------+-
+* End of local variables
+*--------+---------+---------+---------+---------+---------+---------+-
+JOBVAR_DATA_END    DS    0D
+*
+*
+         DROP  ,
+*
+*
+ISSUE_IAZXJSAB     DS    0D
+*--------+---------+---------+---------+---------+---------+---------+-
+* Subroutine to issue IAZXJSAB to gather the data required
+*
+* Input
+*
+* n/a
+*
+* Output
+*
+* R15 - Return code value (always zero)
+*
+*
+* Regs used
+*
+* R2  -
+* R3  -
+* R4  -
+* R5  -
+* R6  -
+* R7  -
+* R8  - ASCB
+* R9  -
+* R10 -
+* R11 -
+* R12 - Literal pool and constants
+* R13 - Working storage (WA)
+*
+* Notes
+*
+* (o)
+*--------+---------+---------+---------+---------+---------+---------+-
+         USING WA,R13
+         USING ASCB,R8
+         BAKR  R14,R0
+         LARL  R12,ISSUE_IAZXJSAB_DATA
+         USING (ISSUE_IAZXJSAB_DATA,ISSUE_IAZXJSAB_DATA_END),R12
+*--------+---------+---------+---------+---------+---------+---------+-
+* Clear return area to blanks - replace with in-house macro if needed
+*--------+---------+---------+---------+---------+---------+---------+-
+         MVI   WA_IAZXJSAB,C' '
+         MVC   WA_IAZXJSAB+1(WA@IAZXJSAB_LEN-1),WA_IAZXJSAB
+*--------+---------+---------+---------+---------+---------+---------+-
+* Invoke service to process the JSAB for this ASCB
+*--------+---------+---------+---------+---------+---------+---------+-
+         IAZXJSAB READ,ASCB=(R8),                                      +
+               JOBNAME=WA_IAZXJSAB_JOBNAME,                            +
+               JOBID=WA_IAZXJSAB_JOBID,                                +
+               JOBCORR=WA_IAZXJSAB_JOBCORR,                            +
+               USERID=WA_IAZXJSAB_USERID,                              +
+               SSNAME=WA_IAZXJSAB_SSNAME,                              +
+               XCFGPNM=WA_IAZXJSAB_XCFGPNM
+         LHI   R15,LC@RC_ZERO
+         PR
+*--------+---------+---------+---------+---------+---------+---------+-
+* Local constants and literals (addressed by R12)
+*--------+---------+---------+---------+---------+---------+---------+-
+ISSUE_IAZXJSAB_DATA     DS    0D
+         DC    A(ISSUE_IAZXJSAB)       Subroutine start (debug)
+         LTORG ,
+ISSUE_IAZXJSAB_DATA_END DS    0D
+*
+         DROP  ,
+*
+*
+*
+*--------+---------+---------+---------+---------+---------+---------+-
+* DSECTs
+*--------+---------+---------+---------+---------+---------+---------+-
+*
+*
+WA                  DSECT
+*--------+---------+---------+---------+---------+---------+---------+-
+* Working storage
+*--------+---------+---------+---------+---------+---------+---------+-
+WA_F1SA             DS    XL(SAVER_LEN) Savearea
+WA_CSECT            DS    CL8           Eye-catcher for dump
+WA_FUNCTION         DS    CL8           Function requested
+WA_IAZXJSAB         DS    0C
+WA_IAZXJSAB_JOBNAME DS    CL8           Jobname
+WA_IAZXJSAB_JOBID   DS    CL8           JES jobid
+WA_IAZXJSAB_USERID  DS    CL8           Userid (Owner)
+WA_IAZXJSAB_SSNAME  DS    CL4           Subsystem
+WA_IAZXJSAB_JOBCORR DS    CL64          Job correlator
+WA_IAZXJSAB_XCFGPNM DS    CL8           JES MAS name
+WA@IAZXJSAB_LEN     EQU   *-WA_IAZXJSAB
+                    DS    0D
+WA@USED_LEN         EQU   *-WA          Used length
+WA@LEN              EQU   8192
+WA@SUBPOOL          EQU   51
+*
+*
+*
+FUNCTAB             DSECT
+*--------+---------+---------+---------+---------+---------+---------+-
+* Function table entry
+*--------+---------+---------+---------+---------+---------+---------+-
+FUNCTAB_NAME        DS    CL8           Function name
+FUNCTAB_ROUTINE     DS    A             Data gathering routine
+FUNCTAB_DATA_OFFSET DS    F             Data offset in WA
+FUNCTAB_DATA_LEN    DS    F             Data length
+FUNCTAB@LEN         EQU   *-FUNCTAB
+*
+*--------+---------+---------+---------+---------+-- ------+---------+-
+* Basic MVS control blocks and equates
+*--------+---------+---------+---------+---------+---------+---------+-
+         IHAPSA
+         CVT       DSECT=YES,LIST=YES
+         IHAASCB
+         IHAASSB
+         IHAASVT
+         IHASAVER
+         IAZJSAB   LIST=YES
+         YREGS
+*--------+---------+---------+---------+---------+---------+---------+-
+* REXX control blocks
+*--------+---------+---------+---------+---------+---------+---------+-
+         IRXEFPL
+         IRXEVALB
+         IRXARGTB  DECLARE=YES
+*
+         END
